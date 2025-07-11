@@ -2,6 +2,8 @@ package com.agney.planegame
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.media.MediaPlayer
+import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -53,11 +55,23 @@ data class HighScore(
 )
 
 class MainActivity : ComponentActivity() {
+    private lateinit var mediaPlayer: MediaPlayer
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             PlaneGame()
         }
+
+        mediaPlayer = MediaPlayer.create(this, R.raw.music_bg)
+        mediaPlayer.isLooping = true // Loop the music
+        mediaPlayer.start()
+
+    }
+
+    override fun onDestroy() {
+        mediaPlayer.release()
+        super.onDestroy()
     }
 }
 
@@ -195,15 +209,15 @@ fun HighScoreScreen(
 
 @Composable
 fun GameScreen(onGameOver: (Int) -> Unit) {
-    var score by remember { mutableStateOf(0) }
+    var score by remember { mutableIntStateOf(0) }
     var gameOver by remember { mutableStateOf(false) }
     var planePosition by remember { mutableStateOf(Offset(0f, 0f)) }
     var zombies by remember { mutableStateOf(listOf<Zombie>()) }
     var bullets by remember { mutableStateOf(listOf<Bullet>()) }
     var moveLeft by remember { mutableStateOf(false) }
     var moveRight by remember { mutableStateOf(false) }
-    var speedMultiplier by remember { mutableStateOf(1f) }
-    var gameTime by remember { mutableStateOf(0L) }
+    var speedMultiplier by remember { mutableFloatStateOf(1f) }
+    var gameTime by remember { mutableLongStateOf(0L) }
     val focusManager = LocalFocusManager.current
     
     val density = LocalDensity.current
@@ -213,6 +227,10 @@ fun GameScreen(onGameOver: (Int) -> Unit) {
     val image = ImageBitmap.imageResource(id = R.drawable.minecraftzombiesmall)
     val player = ImageBitmap.imageResource(id = R.drawable.player)
     val arrow = ImageBitmap.imageResource(id = R.drawable.arrow)
+    val context = LocalContext.current
+    val shootingMediaPlayer : MediaPlayer = remember {
+        MediaPlayer.create(context, R.raw.gun)
+    }
 
     Box(
         modifier = Modifier
@@ -220,38 +238,81 @@ fun GameScreen(onGameOver: (Int) -> Unit) {
             .background(Color.Black)
             .focusable()
             .onKeyEvent { keyEvent ->
-                when (keyEvent.nativeKeyEvent.keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        if (keyEvent.type == KeyEventType.KeyDown) {
-                            moveLeft = true
-                        } else if (keyEvent.type == KeyEventType.KeyUp) {
-                            moveLeft = false
+                val isDPad = Dpad.isDpadDevice(event = keyEvent.nativeKeyEvent)
+                if(isDPad){
+                    var eventStatus = true
+                    val direction = Dpad().getDirectionPressed(event = keyEvent.nativeKeyEvent)
+                    when(direction){
+                        Dpad.LEFT -> {
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                moveLeft = true
+                            } else if (keyEvent.type == KeyEventType.KeyUp) {
+                                moveLeft = false
+                            }
                         }
-                        true
-                    }
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        if (keyEvent.type == KeyEventType.KeyDown) {
-                            moveRight = true
-                        } else if (keyEvent.type == KeyEventType.KeyUp) {
-                            moveRight = false
+                        Dpad.RIGHT -> {
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                moveRight = true
+                            } else if (keyEvent.type == KeyEventType.KeyUp) {
+                                moveRight = false
+                            }
                         }
-                        true
-                    }
-                    KeyEvent.KEYCODE_DPAD_CENTER,
-                    KeyEvent.KEYCODE_ENTER,
-                    KeyEvent.KEYCODE_BUTTON_A -> {
-                        if (keyEvent.type == KeyEventType.KeyDown) {
-                            bullets = bullets + Bullet(position = planePosition)
+                        Dpad.CENTER -> {
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                if(shootingMediaPlayer.isPlaying){
+                                    shootingMediaPlayer.seekTo(0)
+                                }else{
+                                    shootingMediaPlayer.start()
+                                }
+                                bullets = bullets + Bullet(position = planePosition)
+                            }
                         }
-                        true
+                        else -> eventStatus = false
                     }
-                    KeyEvent.KEYCODE_BACK -> {
-                        if (keyEvent.type == KeyEventType.KeyDown) {
-                            onGameOver(score)
+                    eventStatus
+                }else {
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                moveLeft = true
+                            } else if (keyEvent.type == KeyEventType.KeyUp) {
+                                moveLeft = false
+                            }
+                            true
                         }
-                        true
+
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                moveRight = true
+                            } else if (keyEvent.type == KeyEventType.KeyUp) {
+                                moveRight = false
+                            }
+                            true
+                        }
+
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_BUTTON_A -> {
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                if(shootingMediaPlayer.isPlaying){
+                                    shootingMediaPlayer.seekTo(0)
+                                }else{
+                                    shootingMediaPlayer.start()
+                                }
+                                bullets = bullets + Bullet(position = planePosition)
+                            }
+                            true
+                        }
+
+                        KeyEvent.KEYCODE_BACK -> {
+                            if (keyEvent.type == KeyEventType.KeyDown) {
+                                onGameOver(score)
+                            }
+                            true
+                        }
+
+                        else -> false
                     }
-                    else -> false
                 }
             }
             .pointerInput(Unit) {
@@ -345,6 +406,7 @@ fun GameScreen(onGameOver: (Int) -> Unit) {
         }
     }
 
+
     // Update game state
     LaunchedEffect(gameOver) {
         val startTime = System.currentTimeMillis()
@@ -402,11 +464,22 @@ fun GameScreen(onGameOver: (Int) -> Unit) {
             }
         }
     }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            shootingMediaPlayer.release()
+        }
+    }
 }
 
 fun saveHighScore(sharedPreferences: SharedPreferences, score: Int) {
     val currentScores = loadHighScores(sharedPreferences).toMutableList()
-    val newScore = HighScore(score, java.time.LocalDate.now().toString())
+    val date = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        java.time.LocalDate.now()
+    } else {
+        java.util.Date()
+    }
+    val newScore = HighScore(score, date.toString())
     currentScores.add(newScore)
     currentScores.sortByDescending { it.score }
     val topScores = currentScores.take(10)
